@@ -63,6 +63,8 @@ hdelay_per_line <- mapreduce(hd0,
 result = from.dfs(hdelay_per_line)
 head(result)
 
+# haversine tavolsag
+# TODO: rendezes, vehicle valtasnal torles, beletenni az utolso ismert delay-t 
 haversines <- mapreduce(td0, 
   map = function(k, v)
     keyval(c(v$id,v$id+1),cbind(v$lat,v$lon)),   
