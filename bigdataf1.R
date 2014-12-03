@@ -65,29 +65,67 @@ head(result)
 
 # haversine tavolsag
 # TODO: rendezes, vehicle valtasnal torles, beletenni az utolso ismert delay-t 
+
+compareNA <- function(v1,v2) {
+  # This function returns TRUE wherever elements are the same, including NA's,
+  # and false everywhere else.
+  same <- (v1 == v2)  |  (is.na(v1) & is.na(v2))
+  same[is.na(same)] <- FALSE
+  return(same)
+}
+
+hordered <- mapreduce(hd0, 
+                             map = function(k, v)
+                               keyval(v$vehicle_journey_id, v), 
+                             reduce = function(k, v) 
+                               keyval(k,v))
+result = from.dfs(hordered)$val
+result$id <- 1:nrow(result)
+head(result,50)
+td0 <- to.dfs(head(result,50))
+
+
 haversines <- mapreduce(td0, 
-  map = function(k, v)
-    keyval(c(v$id,v$id+1),cbind(v$lat,v$lon)),   
-   reduce = function(k, v) {
-     # kinyerjuk a koordinatakat a reduce set-bol
-     lat = v[1]
-     lon = v[3]
-     plat = v[2]
-     plon= v[4] 
-     # radian konverzio
-     rlat = lat*pi/180
-     rlon = lon*pi/180
-     rplat = plat*pi/180
-     rplon= plon*pi/180
-     
-     # haversine tavolsag szamitasa
-     R <- 6371 # Earth mean radius [km]
-     delta.long <- (rplon - rlon)
-     delta.lat <- (rplat - rlat)
-     a <- sin(delta.lat/2)^2 + cos(rlat) * cos(rplat) * sin(delta.long/2)^2
-     c <- 2 * asin(min(1,sqrt(a)))
-     cbind(id = k, lat = lat, lon = lon, plat = plat, plon= plon, distdelta = R*c)})
-   
+                        map = function(k, v)
+                          keyval(c(v$id,v$id+1),cbind(v$lat,v$lon,v$vehicle_journey_id,v$delay)),   
+                        reduce = function(k, v) {
+                          # kinyerjuk a koordinatakat a reduce set-bol
+                          if (length(v) <= 4){
+                          lat = v[1]
+                          lon = v[2]  
+                          plat = NA
+                          plon= NA
+                          vjid = v[3]
+                          pvjid = NA
+                          del = v[4]  
+                          pdel = NA}  
+                          if (length(v) > 4){                          
+                          lat = v[1]
+                          lon = v[3]  
+                          plat = v[2]
+                          plon= v[4]
+                          vjid = v[5]
+                          pvjid = v[6]
+                          del = v[7]  
+                          pdel = v[8]}  
+                          # radian konverzio
+                          rlat = lat*pi/180
+                          rlon = lon*pi/180
+                          rplat = plat*pi/180
+                          rplon= plon*pi/180
+                          
+                          # haversine tavolsag szamitasa
+                          R <- 6371 # Earth mean radius [km]
+                          delta.long <- (rplon - rlon)
+                          delta.lat <- (rplat - rlat)
+                          a <- sin(delta.lat/2)^2 + cos(rlat) * cos(rplat) * sin(delta.long/2)^2
+                          c <- 2 * asin(min(1,sqrt(a)))
+                          
+                          if (compareNA(vjid,pvjid)) distdelta = R*c
+                          else distdelta = NA
+                          
+                          cbind(id=k,lat=lat,lon=lon,vjid=vjid,del=del,plat=plat,plon=plon,pvjid=pvjid,pdel=pdel,distdelta = distdelta)})
+
 result = from.dfs(haversines)$val
 head(result)
 
