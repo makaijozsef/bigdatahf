@@ -2,24 +2,34 @@
 library('devtools')
 
 install_github('rmr2', 'RevolutionAnalytics', subdir='pkg')
+install_github('bigvis', 'hadley')
 library('rmr2')
+library('bigvis')
 rmr.options(backend="local")
 
-
+rread <- function(dset,tt = TRUE) {
+  if (tt) result = from.dfs(dset)$val
+  else result = from.dfs(dset)
+  return(head(result))  
+}
 
 # fajl beolvasas TODO: egyelore csak egy nap
 d0 = read.csv('e:/munka/BME/BigData/siri.20121125.csv',col.names = c('ts','line_id','direction','journey_pattern_id','time_frame','vehicle_journey_id','operator','congestion','lon','lat','delay','block_id','vehicle_id','stop_id','at_stop'))
 #subset(d0[ ! duplicated( d0[ c("line_id","operator") ] ) , ], select=c("line_id","operator"))
 #summary(d0)
+d0 = d0[order(d0$vehicle_journey_id, d0$ts, d0$journey_pattern_id),] 
 d0$id <- 1:nrow(d0)
+#d0$tst<-as.POSIXct(d0$ts/1e6, origin="1970-01-01")
+#d0$tsd<-as.Date(d0$tst)
+
 # TODO order by first
 
 # lenyomjuk az adatot "hadoop"-ba
 hd0 <- to.dfs(d0)
 
+
 #csinalunk egy pici mintat
 td0 <- to.dfs(head(d0,5))
-
 # egyedi line, operator parok kinyerese trukkos aggregacioval TODO: lehetne szebb
 hlines_ops <-  mapreduce(input = hd0, 
                          map = function(., v)
@@ -36,6 +46,12 @@ hops_per_line <-  mapreduce(input = hlines_ops,
                               keyval(k, length(vv))
                             }
 )
+hops_per_line <- mapreduce(hlines_ops, 
+                             map = function(k, v)
+                               keyval(k$line_id, 1), 
+                             reduce = function(k, v) 
+                               cbind(line = k, no_ops = sum(v, na.rm = TRUE)))
+
 # vonalak szama operatoronkent
 hlines_per_op <-  mapreduce(input = hlines_ops, 
                             map = function(k, .)
@@ -74,18 +90,16 @@ compareNA <- function(v1,v2) {
   return(same)
 }
 
-hordered <- mapreduce(hd0, 
-                             map = function(k, v)
-                               keyval(v$vehicle_journey_id, v), 
-                             reduce = function(k, v) 
-                               keyval(k,v))
-result = from.dfs(hordered)$val
-result$id <- 1:nrow(result)
-head(result,50)
-td0 <- to.dfs(head(result,50))
+# hordered <- mapreduce(td0, 
+#                              map = function(k, v)
+#                                keyval(v$vehicle_journey_id, v), 
+#                              reduce = function(k, v) 
+#                                keyval(k,v))
+# rread(hordered)
+# 
+# result$id <- 1:nrow(result)
 
-
-haversines <- mapreduce(td0, 
+haversines <- mapreduce(hd0, 
                         map = function(k, v)
                           keyval(c(v$id,v$id+1),cbind(v$lat,v$lon,v$vehicle_journey_id,v$delay)),   
                         reduce = function(k, v) {
@@ -126,10 +140,6 @@ haversines <- mapreduce(td0,
                           
                           cbind(id=k,lat=lat,lon=lon,vjid=vjid,del=del,plat=plat,plon=plon,pvjid=pvjid,pdel=pdel,distdelta = distdelta)})
 
-result = from.dfs(haversines)$val
-head(result)
-
-#distHaversine(c(53.39514, -6.375028), c(53.376373, -6.587523))
 
 # eredmenyek kiolvasasa
 from.dfs(hdelay_per_line)
@@ -146,3 +156,6 @@ colnames(d2) <- c('line_id','operator')
 # plotolas
 d3 = merge(x = d1, y = d2, by = "line_id", all = TRUE)
 plot(d3$mean_delay, d3$operator)
+# szebben
+p1 <- ggplot(d3, aes(x = operator, y = mean_delay))
+p2 <- p1 + geom_point(color="blue")            #set one color for all points
