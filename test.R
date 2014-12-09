@@ -34,9 +34,22 @@ avg_delay_per_day <-  mapreduce(input = end_delay_per_journey,
                                 }
 )
 
+# csinalunk belole dataframe-et
+daily <- data.frame(days=from.dfs(avg_delay_per_day)$key, delay=from.dfs(avg_delay_per_day)$val)
+daily$days <- factor(daily$days, levels= c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+daily <- daily[order(daily$days), ]
+
+
 # plotok
 
+
 # operator <--> járatok száma bar chart
-barplot(height=from.dfs(hlines_per_op)$val, names.arg=from.dfs(hlines_per_op)$key)
+barplot(height=from.dfs(hlines_per_op)$val, names.arg=from.dfs(hlines_per_op)$key, xlab="Operators", ylab="Lines")
 # járatok átlagos késése naponként
-barplot(height=from.dfs(avg_delay_per_day)$val, names.arg=from.dfs(avg_delay_per_day)$key)
+barplot(height=daily$delay, names.arg=daily$days, xlab="Days", ylab="Delay")
+# linechart
+plt <- xyplot(daily$delay ~ daily$days, type='b', xlab="Days", ylab="Delay")
+update(plt, par.settings = list(fontsize = list(text = 25, points = 20)))
+
+DublinMap <- qmap('dublin', zoom = 11,color = 'bw', legend = 'topleft')
+DublinMap +geom_point(aes(x = lon, y = lat), data = subset(aggreg, at_stop == 1) )
