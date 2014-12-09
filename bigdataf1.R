@@ -26,8 +26,7 @@ d0 = read.csv('e:/munka/BME/BigData/siri.20121125.csv',col.names = c('ts','line_
 #summary(d0)
 d0 = d0[order(d0$vehicle_journey_id, d0$ts, d0$journey_pattern_id),] 
 d0$id <- 1:nrow(d0)
-#d0$tst<-as.POSIXct(d0$ts/1e6, origin="1970-01-01")
-#d0$tsd<-as.Date(d0$tst)
+d0$tst <- paste(format(as.POSIXct(d0$ts/1e6, origin="1970-01-01"),"%Y-%b-%d %H"),'h', sep='')
 
 # TODO order by first
 
@@ -83,8 +82,51 @@ hdelay_per_line <- mapreduce(hd0,
         keyval(v$line_id, v$delay), 
     reduce = function(k, v) 
         cbind(line = k, mean = mean(v, na.rm = TRUE)))
-result = from.dfs(hdelay_per_line)
-head(result)
+rread(hdelay_per_line,FALSE)
+
+#szumma atlagos keses orara
+hmean_delay_ <- mapreduce(td0, 
+                             map = function(k, v){
+                               day <- as.Date(v$ts/1e6, origin="1970-01-01")
+                               keyval(v$day, v$delay)}, 
+                             reduce = function(k, v) 
+                               cbind(line = k, mean = mean(v, na.rm = TRUE)))
+rread(hdelay_per_line,FALSE)
+
+# INNEN KELLENE FUTTATUNI
+hhourly_meandelay <-  mapreduce(input = hd0, 
+                                map = function(., v)
+                                  keyval(v[, c("vehicle_journey_id","time_frame","tst")], v[, c("delay")]),
+                                reduce = function(k, vv) 
+                                  keyval(k, mean(vv)) 
+                                
+)
+
+#rread(hhourly_meandelay)
+
+hhourly_totaldelay <-  mapreduce(input = hhourly_meandelay, 
+                                map = function(k, v)
+                                  keyval(k[, c("tst")], v),
+                                reduce = function(k, vv) 
+                                  keyval(k, sum(vv)) 
+)
+#rread(hhourly_totaldelay,FALSE)
+
+#ddelay = data.frame(from.dfs(hhourly_meandelay))
+#colnames(ddelay) <- c("vehicle_journey_id","time_frame","hour","total_delay")
+#head(ddelay,10)
+#ddelay = ddelay[order(ddelay$hour),]
+#ddelay$date = as.Date(ddelay$hour, format="%Y-%b-%d %H")
+
+ddelay = data.frame(from.dfs(hhourly_totaldelay))
+colnames(ddelay) <- c('hour','total_delay')
+ddelay = ddelay[order(ddelay$hour),]
+
+#write.csv(ddelay, file='c:/Users/gergo/Documents/bigdatahf/ddelay.csv', sep=',', row.names=FALSE, quote=FALSE)
+
+plt <- xyplot(ddelay$total_delay ~ ddelay$hour, type='b', xlab="Hours", ylab="Total delay")
+update(plt, par.settings = list(superpose.line = list(lwd=10),fontsize = list(text = 25, points = 20)), scale= list(rot = 45))
+# FUTTATAS VEGE
 
 # haversine tavolsag
 # TODO: rendezes, vehicle valtasnal torles, beletenni az utolso ismert delay-t 
@@ -147,6 +189,19 @@ haversines <- mapreduce(hd0,
                           
                           cbind(id=k,lat=lat,lon=lon,vjid=vjid,del=del,plat=plat,plon=plon,pvjid=pvjid,pdel=pdel,distdelta = distdelta)})
 
+rread(haversines)
+
+hhourly_totalkm <-  mapreduce(input = haversines, 
+                                 map = function(., v)
+                                   keyval(v[, c("vjid")], v[, c("distdelta")]),
+                                 reduce = function(k, vv) 
+                                   keyval(k, sum(vv, na.rm = TRUE)) 
+)
+
+rread(hhourly_totalkm,FALSE)
+
+result <- from.dfs(haversines)
+dhaver = data.frame(result)
 
 # eredmenyek kiolvasasa
 from.dfs(hdelay_per_line)
