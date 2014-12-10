@@ -24,18 +24,43 @@ rread <- function(dset,tt = TRUE) {
 d0 = read.csv('e:/munka/BME/BigData/siri.20121125.csv',col.names = c('ts','line_id','direction','journey_pattern_id','time_frame','vehicle_journey_id','operator','congestion','lon','lat','delay','block_id','vehicle_id','stop_id','at_stop'))
 #subset(d0[ ! duplicated( d0[ c("line_id","operator") ] ) , ], select=c("line_id","operator"))
 #summary(d0)
-d0 = d0[order(d0$vehicle_journey_id, d0$ts, d0$journey_pattern_id),] 
+d0 = d0[order(d0$time_frame,d0$vehicle_journey_id, d0$ts, d0$journey_pattern_id),] 
 d0$id <- 1:nrow(d0)
 d0$tst <- paste(format(as.POSIXct(d0$ts/1e6, origin="1970-01-01"),"%Y-%b-%d %H"),'h', sep='')
 
-# TODO order by first
+d0 <- shift.column(data=d0, columns=c("lat","lon","vehicle_journey_id"),up=FALSE)
+
+calc_haversine <- function(lat, lon, plat, plon, vjid, pvjid) {
+  rlat = lat*pi/180
+  rlon = lon*pi/180
+  rplat = plat*pi/180
+  rplon= plon*pi/180
+  
+  # haversine tavolsag szamitasa
+  R <- 6371 # Earth mean radius [km]
+  delta.long <- (rplon - rlon)
+  delta.lat <- (rplat - rlat)
+  a <- sin(delta.lat/2)^2 + cos(rlat) * cos(rplat) * sin(delta.long/2)^2
+  c <- 2 * asin(min(1,sqrt(a)))
+  
+  if (compareNA(vjid,pvjid)) distdelta = R*c
+  else distdelta = NA
+  return(distdelta)
+}
+
+
+d0$distdelta <- mapply(calc_haversine, d0$lat, d0$lon, d0$lat.Shifted, d0$lon.Shifted, d0$vehicle_journey_id, d0$vehicle_journey_id.Shifted) 
+ 
+  
+#deleting columns
+d0 <-subset(d0,,-c(lon.Shifted,lat.Shifted,vehicle_journey_id.Shifted))
 
 # lenyomjuk az adatot "hadoop"-ba
 hd0 <- to.dfs(d0)
 
 
 #csinalunk egy pici mintat
-td0 <- to.dfs(head(d0,5))
+td0 <- to.dfs(head(d0,500))
 # egyedi line, operator parok kinyerese trukkos aggregacioval TODO: lehetne szebb
 hlines_ops <-  mapreduce(input = hd0, 
                          map = function(., v)
@@ -84,16 +109,10 @@ hdelay_per_line <- mapreduce(hd0,
         cbind(line = k, mean = mean(v, na.rm = TRUE)))
 rread(hdelay_per_line,FALSE)
 
-#szumma atlagos keses orara
-hmean_delay_ <- mapreduce(td0, 
-                             map = function(k, v){
-                               day <- as.Date(v$ts/1e6, origin="1970-01-01")
-                               keyval(v$day, v$delay)}, 
-                             reduce = function(k, v) 
-                               cbind(line = k, mean = mean(v, na.rm = TRUE)))
-rread(hdelay_per_line,FALSE)
+
 
 # INNEN KELLENE FUTTATUNI
+# szumma atlagos keses orankent
 hhourly_meandelay <-  mapreduce(input = hd0, 
                                 map = function(., v)
                                   keyval(v[, c("vehicle_journey_id","time_frame","tst")], v[, c("delay")]),
@@ -127,6 +146,42 @@ ddelay = ddelay[order(ddelay$hour),]
 plt <- xyplot(ddelay$total_delay ~ ddelay$hour, type='b', xlab="Hours", ylab="Total delay")
 update(plt, par.settings = list(superpose.line = list(lwd=10),fontsize = list(text = 25, points = 20)), scale= list(rot = 45))
 # FUTTATAS VEGE
+
+# szumma km orankent
+
+hhourly_totaldist <-  mapreduce(input = hd0, 
+                                map = function(., v)
+                                  keyval(v[, c("tst")], v[, c("distdelta")]),
+                                reduce = function(k, vv) 
+                                  keyval(k, sum(vv,na.rm = TRUE)) 
+)
+#rread(hhourly_totaldist,FALSE)
+
+dkm = data.frame(from.dfs(hhourly_totaldist))
+colnames(dkm) <- c('tst','distdelta')
+dkm = dkm[order(dkm$tst),]
+
+plt <- xyplot(dkm$distdelta ~ as.factor(dkm$tst), type='b', xlab="Hours", ylab="Total distance")
+update(plt, par.settings = list(superpose.line = list(lwd=10),fontsize = list(text = 25, points = 20)), scale= list(rot = 45))
+
+# szumma jarmuvek orankent
+
+hhourly_count <-  mapreduce(input = hd0, 
+                                map = function(., v)
+                                  keyval(v[, c("tst")], v[, c("vehicle_id")]),
+                                reduce = function(k, vv) 
+                                  keyval(k, length(unique(vv))) 
+)
+#rread(hhourly_count,FALSE)
+
+dcount = data.frame(from.dfs(hhourly_count))
+colnames(dcount) <- c('tst','vehicle_count')
+dcount = dcount[order(dcount$tst),]
+
+plt <- xyplot(dcount$vehicle_count ~ as.factor(dcount$tst), type='b', xlab="Hours", ylab="Vehicle count")
+update(plt, par.settings = list(superpose.line = list(lwd=10),fontsize = list(text = 25, points = 20)), scale= list(rot = 45))
+
+# EDDIG
 
 # haversine tavolsag
 # TODO: rendezes, vehicle valtasnal torles, beletenni az utolso ismert delay-t 
