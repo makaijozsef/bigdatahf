@@ -1,5 +1,7 @@
-
+# IMPORTS
 library('devtools')
+library('lattice')
+library('ggmap')
 
 install_github('rmr2', 'RevolutionAnalytics', subdir='pkg')
 install_github('bigvis', 'hadley')
@@ -13,12 +15,13 @@ rread <- function(dset,tt = TRUE) {
   return(head(result))  
 }
 
-# CSV beolvaso es osszefuzo kod
-# filenames <- list.files(path = "D:Downloads/bigdata_data", full.names = TRUE)
-# filenames
-# aggreg <- do.call("rbind", lapply(filenames[1:10], read.csv, col.names = c('ts','line_id','direction','journey_pattern_id','time_frame','vehicle_journey_id','operator','congestion','lon','lat','delay','block_id','vehicle_id','stop_id','at_stop')))
-# aggreg$id <- 1:nrow(aggreg)
-# hd0 <- to.dfs(aggreg)
+# Egy adott könyvtár 4-13. (csv) fájljait összefuzzük egy nagy dataframe-be
+# És még hozzáadunk sorfolytonos id és olyan attribútumot timestamp alapján, hogy mely órában történt megfigyelés
+filenames <- list.files(path = "D:Downloads/bigdata_data", full.names = TRUE)
+filenames
+d0 <- do.call("rbind", lapply(filenames[4:13], read.csv, col.names = c('ts','line_id','direction','journey_pattern_id','time_frame','vehicle_journey_id','operator','congestion','lon','lat','delay','block_id','vehicle_id','stop_id','at_stop')))
+d0$id <- 1:nrow(d0)
+d0$tst <- paste(format(as.POSIXct(d0$ts/1e6, origin="1970-01-01"),"%Y-%b-%d %H"),'h', sep='')
 
 # fajl beolvasas TODO: egyelore csak egy nap
 d0 = read.csv('e:/munka/BME/BigData/siri.20121125.csv',col.names = c('ts','line_id','direction','journey_pattern_id','time_frame','vehicle_journey_id','operator','congestion','lon','lat','delay','block_id','vehicle_id','stop_id','at_stop'))
@@ -61,6 +64,46 @@ hd0 <- to.dfs(d0)
 
 #csinalunk egy pici mintat
 td0 <- to.dfs(head(d0,500))
+
+# MAPREDUCE kódok
+
+# utolsó mért késés járatra max timestamp alapján
+end_delay_per_journey <-  mapreduce(input = hd0, 
+                                    map = function(., v){
+                                      keyval(v[, c("vehicle_journey_id","time_frame")], v[, c("delay","ts")])
+                                    },
+                                    reduce = function(k, vv) {
+                                      #kikeressük max timestamp-hez a késés mértékét
+                                      max_place <- which.max(vv[, c("ts")])
+                                      last_delay <- vv[max_place, c("delay")]
+                                      # csak azt engedjük tovább, ami nem 0 késés, sanszos, hogy az rossz adat (sok járatnál végig 0)
+                                      if(last_delay!=0)keyval(k, last_delay)
+                                    }
+)
+
+# járatok medián késése naponként
+avg_delay_per_day <-  mapreduce(input = end_delay_per_journey, 
+                                map = function(k, v){
+                                  # A nap lesz a kulcs
+                                  day <- weekdays(as.Date(k$time_frame))
+                                  keyval(day, v)
+                                },
+                                reduce = function(k, vv) {
+                                  keyval(k, median(vv))
+                                }
+)
+
+# csinalunk belole dataframe-et
+daily <- data.frame(days=from.dfs(avg_delay_per_day)$key, delay=from.dfs(avg_delay_per_day)$val)
+daily$days <- factor(daily$days, levels= c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+daily <- daily[order(daily$days), ]
+
+# Ehhez tartozó plot (lattice kell hozzá)
+plt <- xyplot(daily$delay ~ daily$days, type='b', xlab="Days", ylab="Delay")
+update(plt, par.settings = list(fontsize = list(text = 25, points = 20)))
+
+# -----------------------------------------------------------------------------------
+
 # egyedi line, operator parok kinyerese trukkos aggregacioval TODO: lehetne szebb
 hlines_ops <-  mapreduce(input = hd0, 
                          map = function(., v)
@@ -109,7 +152,33 @@ hdelay_per_line <- mapreduce(hd0,
         cbind(line = k, mean = mean(v, na.rm = TRUE)))
 rread(hdelay_per_line,FALSE)
 
+# Eredmények kinyerése
+result <- from.dfs(hdelay_per_line)
+d1 = data.frame(result)
+colnames(d1) <- c('line_id','mean_delay')
 
+result <- from.dfs(hops_per_line)
+d2 = data.frame(result)
+colnames(d2) <- c('line_id','operator')
+
+d3 = merge(x = d1, y = d2, by = "line_id", all = TRUE)
+
+# Ehhez plotok
+
+# Operátorok és késések scatter plot
+p1 <- ggplot(d3, aes(x = operator, y = mean_delay))
+p1 <- p1 + geom_point(color="blue", size = 4)
+p1 + theme(axis.title=element_text(face="bold",size="20"), axis.text = element_text(size = 20), legend.position="top") + labs(x = "Number of Operators", y = "Delay")
+
+# Operátorszám és irányított vonalszám eloszlás
+bar <- barchart(d2$operator, horizontal=FALSE, xlab="Number of Operators", ylab="Number of Lines")
+update(bar, par.settings = list(fontsize = list(text = 20)))
+
+# Lines per operators
+barplot(height=from.dfs(hlines_per_op)$val, names.arg=from.dfs(hlines_per_op)$key, xlab="Operators", ylab="Lines")
+
+
+# -----------------------------------------------------------------------------------------------------
 
 # INNEN KELLENE FUTTATUNI
 # szumma atlagos keses orankent
@@ -143,8 +212,9 @@ ddelay = ddelay[order(ddelay$hour),]
 
 #write.csv(ddelay, file='c:/Users/gergo/Documents/bigdatahf/ddelay.csv', sep=',', row.names=FALSE, quote=FALSE)
 
-plt <- xyplot(ddelay$total_delay ~ ddelay$hour, type='b', xlab="Hours", ylab="Total delay")
-update(plt, par.settings = list(superpose.line = list(lwd=10),fontsize = list(text = 25, points = 20)), scale= list(rot = 45))
+# Ehhez plot
+plot <- ggplot( data = ddelay, aes( strptime(hour, "%Y-%B-%d %Hh"), total_delay /3600 )) + geom_line()
+plot + theme(axis.title=element_text(face="bold",size="20"), axis.text = element_text(size = 20), legend.position="top") + labs(x = "Time (Hours)", y = "Delay (Hours)")
 # FUTTATAS VEGE
 
 # szumma km orankent
@@ -161,8 +231,9 @@ dkm = data.frame(from.dfs(hhourly_totaldist))
 colnames(dkm) <- c('tst','distdelta')
 dkm = dkm[order(dkm$tst),]
 
-plt <- xyplot(dkm$distdelta ~ as.factor(dkm$tst), type='b', xlab="Hours", ylab="Total distance")
-update(plt, par.settings = list(superpose.line = list(lwd=10),fontsize = list(text = 25, points = 20)), scale= list(rot = 45))
+# Plot az óránkénti összes kilométerhez
+plot <- ggplot( data = dkm, aes( strptime(tst, "%Y-%B-%d %Hh"), distdelta)) + geom_line()
+plot + theme(axis.title=element_text(face="bold",size="20"), axis.text = element_text(size = 20), legend.position="top") + labs(x = "Time (Hours)", y = "Total distance (km)")
 
 # szumma jarmuvek orankent
 
@@ -178,8 +249,9 @@ dcount = data.frame(from.dfs(hhourly_count))
 colnames(dcount) <- c('tst','vehicle_count')
 dcount = dcount[order(dcount$tst),]
 
-plt <- xyplot(dcount$vehicle_count ~ as.factor(dcount$tst), type='b', xlab="Hours", ylab="Vehicle count")
-update(plt, par.settings = list(superpose.line = list(lwd=10),fontsize = list(text = 25, points = 20)), scale= list(rot = 45))
+# Plot óránkénti jármumennyiséghez
+plot2 <- ggplot( data = dcount, aes( strptime(tst, "%Y-%B-%d %Hh"), vehicle_count)) + geom_line()
+plot2 + theme(axis.title=element_text(face="bold",size="20"), axis.text = element_text(size = 20), legend.position="top") + labs(x = "Time (Hours)", y = "Number of Vehicles on Journey")
 
 # EDDIG
 
@@ -253,6 +325,7 @@ hhourly_totalkm <-  mapreduce(input = haversines,
                                    keyval(k, sum(vv, na.rm = TRUE)) 
 )
 
+
 rread(hhourly_totalkm,FALSE)
 
 result <- from.dfs(haversines)
@@ -276,3 +349,22 @@ plot(d3$mean_delay, d3$operator)
 # szebben
 p1 <- ggplot(d3, aes(x = operator, y = mean_delay))
 p2 <- p1 + geom_point(color="blue")            #set one color for all points
+
+
+# MAP plotok ------------------------------------------------------------------------
+
+# sima plot
+DublinMap <- qmap('dublin', zoom = 11,color = 'bw', legend = 'topleft')
+DublinMap +geom_point(aes(x = lon, y = lat), data = subset(d0, at_stop == 1) )
+
+# map line id alapján
+DublinMap <- qmap('dublin', zoom = 11,color = 'bw', legend = 'topleft')
+DublinMap +geom_point(aes(x = lon, y = lat), size = 4, data = subset(d0, line_id == "54A") )
+
+# map line id alapján, zoomolva
+DublinMap <- qmap('dublin', zoom = 15,color = 'bw', legend = 'topleft')
+DublinMap +geom_point(aes(x = lon, y = lat), size = 4, data = subset(d0, line_id == "54A") )
+
+# map operator alapján színezve
+DublinMap <- qmap('dublin', zoom = 11,color = 'bw', legend = 'topleft')
+DublinMap +geom_point(aes(x = lon, y = lat, colour = operator), data = subset(d0, at_stop == 1) )
