@@ -3,10 +3,7 @@ library('devtools')
 library('lattice')
 library('ggmap')
 
-install_github('rmr2', 'RevolutionAnalytics', subdir='pkg')
-install_github('bigvis', 'hadley')
 library('rmr2')
-library('bigvis')
 rmr.options(backend="local")
 
 ############### SEGEDFUGGVENYEK ###################
@@ -27,8 +24,8 @@ compareNA <- function(v1,v2) {
 }
 
 ################# FAJLBEOLVASAS ##################################
-# Egy adott k?nyvt?r 4-13. (csv) f?jljait ?sszefuzz?k egy nagy dataframe-be
-# ?s m?g hozz?adunk sorfolytonos id ?s olyan attrib?tumot timestamp alapj?n, hogy mely ?r?ban t?rt?nt megfigyel?s
+# Egy adott konyvtar 4-13. (csv) fajljait osszefuzzuk egy nagy dataframe-be
+# es meg hozzaadunk sorfolytonos id es olyan attributumot timestamp alapjan, hogy mely oraban tortent megfigyeles
 filenames <- list.files(path = "D:Downloads/bigdata_data", full.names = TRUE)
 filenames
 d0 <- do.call("rbind", lapply(filenames[4:13], read.csv, col.names = c('ts','line_id','direction','journey_pattern_id','time_frame','vehicle_journey_id','operator','congestion','lon','lat','delay','block_id','vehicle_id','stop_id','at_stop')))
@@ -44,7 +41,7 @@ d0 = d0[order(d0$time_frame,d0$vehicle_journey_id, d0$ts, d0$journey_pattern_id)
 #sorazonosito generalasa
 d0$id <- 1:nrow(d0)
 
-d#az idobeli aggregacio alapja, melyik nap melyik orajarol van szó
+#az idobeli aggregacio alapja, melyik nap melyik orajarol van szo
 d0$tst <- paste(format(as.POSIXct(d0$ts/1e6, origin="1970-01-01"),"%Y-%b-%d %H"),'h', sep='')
 
 ########### HAVERSINE TAVOLSAG ##################
@@ -93,21 +90,21 @@ hd0 <- to.dfs(d0)
 ############# MAPREDUCE kodok###################
 ################################################
 
-# MR1 utols? m?rt k?s?s j?ratra max timestamp alapj?n
+# MR1 utolso mert keses jaratra max timestamp alapjan
 end_delay_per_journey <-  mapreduce(input = hd0, 
                                     map = function(., v){
                                       keyval(v[, c("vehicle_journey_id","time_frame")], v[, c("delay","ts")])
                                     },
                                     reduce = function(k, vv) {
-                                      #kikeress?k max timestamp-hez a k?s?s m?rt?k?t
+                                      #kikeressuk max timestamp-hez a keses merteket
                                       max_place <- which.max(vv[, c("ts")])
                                       last_delay <- vv[max_place, c("delay")]
-                                      # csak azt engedj?k tov?bb, ami nem 0 k?s?s, sanszos, hogy az rossz adat (sok j?ratn?l v?gig 0)
+                                      # csak azt engedjuk tovabb, ami nem 0 keses, sanszos, hogy az rossz adat (sok jaratnal vegig 0)
                                       if(last_delay!=0)keyval(k, last_delay)
                                     }
 )
 
-# MR2 j?ratok medi?n k?s?se naponk?nt
+# MR2 jaratok median kesese naponkent
 avg_delay_per_day <-  mapreduce(input = end_delay_per_journey, 
                                 map = function(k, v){
                                   # A nap lesz a kulcs
@@ -124,7 +121,7 @@ daily <- data.frame(days=from.dfs(avg_delay_per_day)$key, delay=from.dfs(avg_del
 daily$days <- factor(daily$days, levels= c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
 daily <- daily[order(daily$days), ]
 
-# Ehhez tartoz? plot (lattice kell hozz?)
+# Ehhez tartozo plot (lattice kell hozza)
 plt <- xyplot(daily$delay ~ daily$days, type='b', xlab="Days", ylab="Delay")
 update(plt, par.settings = list(fontsize = list(text = 25, points = 20)))
 
@@ -193,12 +190,12 @@ d3 = merge(x = d1, y = d2, by = "line_id", all = TRUE)
 
 # Ehhez plotok
 
-# Oper?torok ?s k?s?sek scatter plot
+# Operatorok es kesesek scatter plot
 p1 <- ggplot(d3, aes(x = operator, y = mean_delay))
 p1 <- p1 + geom_point(color="blue", size = 4)
 p1 + theme(axis.title=element_text(face="bold",size="20"), axis.text = element_text(size = 20), legend.position="top") + labs(x = "Number of Operators", y = "Delay")
 
-# Oper?torsz?m ?s ir?ny?tott vonalsz?m eloszl?s
+# Operatorszam es iranyitott vonalszam eloszlas
 bar <- barchart(d2$operator, horizontal=FALSE, xlab="Number of Operators", ylab="Number of Lines")
 update(bar, par.settings = list(fontsize = list(text = 20)))
 
@@ -257,7 +254,7 @@ dkm = data.frame(from.dfs(hhourly_totaldist))
 colnames(dkm) <- c('tst','distdelta')
 dkm = dkm[order(dkm$tst),]
 
-# Plot az ?r?nk?nti ?sszes kilom?terhez
+# Plot az orankenti osszes kilometerhez
 plot <- ggplot( data = dkm, aes( strptime(tst, "%Y-%B-%d %Hh"), distdelta)) + geom_line()
 plot + theme(axis.title=element_text(face="bold",size="20"), axis.text = element_text(size = 20), legend.position="top") + labs(x = "Time (Hours)", y = "Total distance (km)")
 
@@ -274,7 +271,7 @@ dcount = data.frame(from.dfs(hhourly_count))
 colnames(dcount) <- c('tst','vehicle_count')
 dcount = dcount[order(dcount$tst),]
 
-# Plot ?r?nk?nti j?rmumennyis?ghez
+# Plot orankenti jarmumennyiseghez
 plot2 <- ggplot( data = dcount, aes( strptime(tst, "%Y-%B-%d %Hh"), vehicle_count)) + geom_line()
 plot2 + theme(axis.title=element_text(face="bold",size="20"), axis.text = element_text(size = 20), legend.position="top") + labs(x = "Time (Hours)", y = "Number of Vehicles on Journey")
 
@@ -334,14 +331,14 @@ rread(haversines)
 DublinMap <- qmap('dublin', zoom = 11,color = 'bw', legend = 'topleft')
 DublinMap +geom_point(aes(x = lon, y = lat), data = subset(d0, at_stop == 1) )
 
-# map line id alapj?n
+# map line id alapjan
 DublinMap <- qmap('dublin', zoom = 11,color = 'bw', legend = 'topleft')
 DublinMap +geom_point(aes(x = lon, y = lat), size = 4, data = subset(d0, line_id == "54A") )
 
-# map line id alapj?n, zoomolva
+# map line id alapjan, zoomolva
 DublinMap <- qmap('dublin', zoom = 15,color = 'bw', legend = 'topleft')
 DublinMap +geom_point(aes(x = lon, y = lat), size = 4, data = subset(d0, line_id == "54A") )
 
-# map operator alapj?n sz?nezve
+# map operator alapjan szinezve
 DublinMap <- qmap('dublin', zoom = 11,color = 'bw', legend = 'topleft')
 DublinMap +geom_point(aes(x = lon, y = lat, colour = operator), data = subset(d0, at_stop == 1) )
